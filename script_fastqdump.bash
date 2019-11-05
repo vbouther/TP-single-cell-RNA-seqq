@@ -10,12 +10,13 @@ cd $data
 mkdir -p sra_data
 cd sra_data
 
-# Make a list of SRR accessions:
-SRR="XXX XXX"
+# Make a list of SRR accessions: we are only interested in the 16d brain
+SRR="SRR8795649 SRR8795651"
 
 # For each SRR accession, download the data :
-for ...  in ....
+for x in $SRR
 do
+fastq-dump $x --split-files
  
 done 
 
