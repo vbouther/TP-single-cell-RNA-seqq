@@ -10,14 +10,13 @@ cd $data
 mkdir -p sra_data
 cd sra_data
 
-# Make a list of SRR accessions: we are only interested in the 16d brain
+# Make a list of SRR accessions: we are only interested in the 16d brain. 
 SRR="SRR8795649 SRR8795651"
 
 # For each SRR accession, download the data :
 for x in $SRR
 do
-fastq-dump $x --split-files
- 
+fastq-dump $x --split-files #fastq-dump uses the NCBI base and gets the data. 
 done 
 
 
