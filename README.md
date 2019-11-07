@@ -60,4 +60,15 @@ Bonne technique à retenir : on donne un nom aux chemins de dossier et on les ap
 -p 6: le nombre de coeurs qu'on utilise de notre machine
 --tgMap: le tableau deux colonnes qu'on lui a donné avec la correspondance nom de transcrit / gène. 
 
-Les résultats sont placés dans alevin_output ici. Les documents .log sont des rapports de travail. 
+Les résultats sont placés dans alevin_output ici. Les documents .log sont des rapports de travail.
+
+
+A partir de alevin meta info dans auxinfo, on regarde si on trouve le même nombre de cellules qu'eux. 
+Nous: 7381 cellules
+Eux : https://trace.ncbi.nlm.nih.gov/Traces/study/?acc=SRX5584534&o=acc_s%3Aa
+SRX5584534 et SRX5584534
+      APPPS1 B6-Tg(Thy1-APPswe; Thy1-PS1 L166P) tissue	whole brain : 2769 cellules
+      APPPS1 B6-Tg(Thy1-APPswe; Thy1-PS1 L166P) tissue	whole brain : 4194 cellules
+      6963 -> 418 cellules de moins. Ils aggrègent sans doute plus les barcodes comme étant la même cellule. Eux ils ont pas utilisé alevin mais cell ranger. A comparer. 
+      
+

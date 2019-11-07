@@ -47,6 +47,19 @@ csra="/home/rstudio/disk/data/sra_data"
 cgenome="/home/rstudio/disk/data/genome"
 
 salmon alevin -l ISR \
+-1 $csra"/SRR8795651_1.fastq" \
+-2 $csra"/SRR8795651_2.fastq" \
+--chromium  \
+-i $cgenome"/transcripts_index" -p 6 -o $cgenome"/alevin_output_APPPS1" --tgMap $cgenome"/tmp.txt"
+
+salmon alevin -l ISR \
+-1  $csra"/SRR8795649_1.fastq" \
+-2  $csra"/SRR8795649_2.fastq" \
+--chromium  \
+-i $cgenome"/transcripts_index" -p 6 -o $cgenome"/alevin_output_WT" --tgMap $cgenome"/tmp.txt"
+
+#Dans cet alevin on avait traité les deux conditions comme des réplicats techniques alors qu'on doit séparer pour traiter les données.
+#salmon alevin -l ISR \
 -1 $csra"/SRR8795651_1.fastq" $csra"/SRR8795649_1.fastq" \
 -2 $csra"/SRR8795651_2.fastq" $csra"/SRR8795649_2.fastq" \
 --chromium  \

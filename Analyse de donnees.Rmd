@@ -3,26 +3,59 @@ title: "QC cell"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r}
+# Seurat v3.0.0 and tximport >=1.13.10
+library(Seurat)
+library(tximport)
+
+# path to the output directory of Alevin run of pbmc_1k 10x V2 data
+alvquant <- file.path("/home/rstudio/disk/data/genome/alevin_output/alevin/quants_mat.gz")
+file.exists(alvquant)
+# Reading in the alevin quants quants
+txi <- tximport(alvquant, type="alevin")
+```
+Controle qualité
+On va compter le nombre d'UMI par cellule pour caractériser la qualité des cellules. Par exemple une cellule aec deux UMI sera éliminée. 
+On compte aussi le nombre de gène exprimés par cellule. 
+Récuperer les gènes mitochondriaux pour voir s'il ne sont pas surexprimés (apoptotiques)
+```{r}
+countUMIcell <- apply(txi$counts, 2, sum)
+countgenescell <- colSums(txi$counts !=0)
+hist(x = countUMIcell, breaks = 1000, xlim=range(0,10000))
+hist(x = countgenescell, breaks = 1000, xlim=range(0,10000))
 ```
 
-## R Markdown
+#names(txi)  "abundance"           "counts"              "length"              "countsFromAbundance"
+#txi$counts[1:5,1:5]
+ TGGACGCCATATGGTC CTACATTAGACTACAA ACGGCCATCGGTTCGG GGTATTGAGGTGCAAC CAGGTGCTCGGAGCAA
+Xkr4                  0                0                0                0                0
+Rp1                   0                0                0                0                0
+Sox17                 0                0                0                0                0
+Mrpl15                5                2                7                2                0
+Lypla1                0                2                0                1                0
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+Recherche des gènes mitochondriaux: Pour trouver la liste: ensembl => 
+```{r}
+listgenes <- txi$counts[,0]
+for (x in listgenes){
+  i <- grep("mt",x)
+  print(i)
+}
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
 ```
-
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+solution
+```{r}
+listgenes<-rownames(listgenes)
+g<-grep('mt-', listgenes) #renvoie la position
+listgenesmt<-listgenes[g]
+listgenesmt
 ```
+On crée la matrice des genes mitochondriaux et les sommes de gènes pour avoir les histogrammes
+```{r}
+counts_mito <- txi$counts[listgenesmt,]
+UMImito <- apply(counts_mito, 2, sum)
+hist(x = UMImito, breaks = 1000)
+```
+Il faut décider d'un seuil au desssus duquel on élimine la cellule car elle exprime trop les gènes mitochondriaux et elle est donc morte. 
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
