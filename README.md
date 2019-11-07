@@ -15,3 +15,8 @@ Then we modified the programm script_fastqdump.bash to be able to download the d
 Then you have to execute it: 
 chmod u+x script_fastqdump.bash # to have the right
 ./nom du programme # to execute 
+
+
+6/11/19
+On a commencé par analyser la qualité de notre jeu de données grace à la fonction script_fastqdumppartial_fastqc.bash qui appelle fastqc qui génère une analyse de la qualité de nos données qu'on peut ouvrir en HTLM.
+Ces données sont poolées 
