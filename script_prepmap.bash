@@ -5,15 +5,19 @@
 #mkdir /home/rstudio/disk/data/genome
 #cd /home/rstudio/disk/data/genome
 
-# 1 fasta sequences whole mouse transcriptome
+# 1 
+#fasta sequences whole mouse transcriptome
 #wget ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M23/gencode.vM23.pc_transcripts.fa.gz #ici on récupère le transcriptome annoté
-# 2 ouverture du zip
+# 2 
+#ouverture du zip
 #gunzip -c gencode.vM23.pc_transcripts.fa.gz > gencode.vM23.pc_transcripts.fa 
 
-# 3 On veut modifier les fichiers génomes et supprimer la fin du nom pour que ca colle avec notre tmp (voir suite)
+# 3 
+#On veut modifier les fichiers génomes et supprimer la fin du nom pour que ca colle avec notre tmp (voir suite)
 #awk 'BEGIN{FS="|"}{print $1}' gencode.vM23.pc_transcripts.fa > gencode.vM23.pc_transcripts.fa_2.txt
 
-#  4 on crée un fichier texte où on aura ce qui est necessaire pour appeler salmon alevin: un fichier avec les séquences du génome (transcrit et le nom du gène qui #correspond. On pool tous les transcrits d'un même gène.)
+#  4 
+#on crée un fichier texte où on aura ce qui est necessaire pour appeler salmon alevin: un fichier avec les séquences du génome (transcrit et le nom du gène qui #correspond. On pool tous les transcrits d'un même gène.)
 #awk 'BEGIN{FS="|"}{if($1~">"){print substr($1,2,length($1)),"\t",$6}}' gencode.vM23.pc_transcripts.fa > tmp.txt
 
 # This is in the case where there are spike in in our study. Not the case for us.
