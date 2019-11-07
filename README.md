@@ -61,6 +61,23 @@ Bonne technique à retenir : on donne un nom aux chemins de dossier et on les ap
 --tgMap: le tableau deux colonnes qu'on lui a donné avec la correspondance nom de transcrit / gène. 
 
 Les résultats sont placés dans alevin_output ici. Les documents .log sont des rapports de travail.
+Pour faire tourner en background: nohup ./script_prepmap.bash
+
+Attention ! On s'etait en réalité trompées en mettant les deux conditions dans le même alevin, on veut les garder séparée. 
+Nouveau code: 
+
+salmon alevin -l ISR \
+-1 $csra"/SRR8795651_1.fastq" \
+-2 $csra"/SRR8795651_2.fastq" \
+--chromium  \
+-i $cgenome"/transcripts_index" -p 6 -o $cgenome"/alevin_output_APPPS1" --tgMap $cgenome"/tmp.txt"
+
+salmon alevin -l ISR \
+-1  $csra"/SRR8795649_1.fastq" \
+-2  $csra"/SRR8795649_2.fastq" \
+--chromium  \
+-i $cgenome"/transcripts_index" -p 6 -o $cgenome"/alevin_output_WT" --tgMap $cgenome"/tmp.txt"
+
 
 
 A partir de alevin meta info dans auxinfo, on regarde si on trouve le même nombre de cellules qu'eux. 
