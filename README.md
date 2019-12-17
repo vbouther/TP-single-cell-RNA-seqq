@@ -24,7 +24,7 @@ Ces données sont mises sur le même fichier html avec
 multiqc ./*_2*.zip & (on ne le fait qu'avec les numéro 2 qui contiennent toute la séquence, on compare nos deux échantillons) 
 Les résultats: https://134.158.247.28/files/disk/data/fastqc/multiqc_report.html
 On aurait pu le faire aussi pour les fichiers 1 qui contiennent l'amorce. 
-On a une bonne qualité de notre jeu de données. On observe beuacoup de duplications mais ce n'est pas étonnant, c'est du au protocole de préparation des données qui comprend une étape d'amplification par PCR.
+On a une bonne qualité de notre jeu de données. On observe beuacoup de duplications mais ce n'est pas étonnant, c'est du au protocole de préparation des données qui comprend une étape d'amplification par PCR (si on regarde les UMI) / car c’est sans doute des transcrits pareils récupérés par des UMI différents.
 
 Ensuite on passe au mapping. 
 On utilise la fonction script_prepmap.bash
@@ -81,7 +81,7 @@ salmon alevin -l ISR \
 
 
 A partir de alevin meta info dans auxinfo, on regarde si on trouve le même nombre de cellules qu'eux. 
-Nous: 7381 cellules
+Nous: 3241 cellules pour la condition WT et 4552 pour la condition mutante. 
 Eux : https://trace.ncbi.nlm.nih.gov/Traces/study/?acc=SRX5584534&o=acc_s%3Aa
 SRX5584534 et SRX5584534
       APPPS1 B6-Tg(Thy1-APPswe; Thy1-PS1 L166P) tissue	whole brain : 2769 cellules

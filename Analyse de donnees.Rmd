@@ -1,7 +1,10 @@
 ---
 title: "QC cell"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
+
 
 ```{r}
 # Seurat v3.0.0 and tximport >=1.13.10
@@ -9,20 +12,37 @@ library(Seurat)
 library(tximport)
 
 # path to the output directory of Alevin run of pbmc_1k 10x V2 data
-alvquant <- file.path("/home/rstudio/disk/data/genome/alevin_output/alevin/quants_mat.gz")
-file.exists(alvquant)
+txi_WT_quant <- file.path("/home/rstudio/disk/data/genome/alevin_output_WT/alevin/quants_mat.gz")
+file.exists(txi_WT_quant)
+txi_APP_quant <- file.path("/home/rstudio/disk/data/genome/alevin_output_APPPS1/alevin/quants_mat.gz")
+file.exists(txi_APP_quant)
 # Reading in the alevin quants quants
-txi <- tximport(alvquant, type="alevin")
+txi_WT <- tximport(txi_WT_quant, type="alevin")
+txi_APP <- tximport(txi_APP_quant, type="alevin")
+
+
+#On peut regarder des abondance des gènes pour chaque cellue associe a un Barcode.
+#Il y a des nombres a virgules car si un transcrit s'aligne a deux endroits différents on pondère avec la probabilité de chance qu'il s'aligne à telle séquence
+txi_WT$counts[1:10, 1:10]
+
+txi_APP$counts[1:10, 1:10]
 ```
+
 Controle qualité
 On va compter le nombre d'UMI par cellule pour caractériser la qualité des cellules. Par exemple une cellule aec deux UMI sera éliminée. 
 On compte aussi le nombre de gène exprimés par cellule. 
 Récuperer les gènes mitochondriaux pour voir s'il ne sont pas surexprimés (apoptotiques)
 ```{r}
-countUMIcell <- apply(txi$counts, 2, sum)
-countgenescell <- colSums(txi$counts !=0)
-hist(x = countUMIcell, breaks = 1000, xlim=range(0,10000))
-hist(x = countgenescell, breaks = 1000, xlim=range(0,10000))
+countUMIcell_WT <- apply(txi_WT$counts,2,sum)
+hist(countUMIcell_WT, breaks=1000, xlim=range(0,10000))
+countgenecell_WT <- colSums(alvWT$counts !=0)
+
+hist(countgenecell_WT, breaks=7000)
+
+countUMIcell_APP <- apply(txi_APP$counts,2,sum)
+hist(countUMIcell_APP, breaks=1000, xlim=range(0,10000))
+countgenecell_APP <- colSums(alvAPP$counts !=0)
+hist(countgenecell_APP, breaks=7000)
 ```
 
 #names(txi)  "abundance"           "counts"              "length"              "countsFromAbundance"
@@ -34,32 +54,34 @@ Sox17                 0                0                0                0      
 Mrpl15                5                2                7                2                0
 Lypla1                0                2                0                1                0
 
-Recherche des gènes mitochondriaux: Pour trouver la liste: ensembl => 
-```{r}
-listgenes <- txi$counts[,0]
-for (x in listgenes){
-  i <- grep("mt",x)
-  print(i)
-}
 
-```
-solution
 ```{r}
-listgenes<-rownames(listgenes)
-g<-grep('mt-', listgenes) #renvoie la position
-listgenesmt<-listgenes[g]
-listgenesmt
+#wt
+listgenes_WT<-rownames(txi_WT$counts)
+g_WT<-grep('mt-', listgenes_WT) #renvoie la position
+listgenesmt_WT<-listgenes_WT[g]
+listgenesmt_WT
+#app
+listgenes_APP<-rownames(txi_APP$counts)
+g_APP<-grep('mt-', listgenes_APP) #renvoie la position
+listgenesmt_APP<-listgenes_APP[g]
+listgenesmt_APP
 ```
 On crée la matrice des genes mitochondriaux et les sommes de gènes pour avoir les histogrammes
 ```{r}
-counts_mito <- txi$counts[listgenesmt,]
-UMImito <- apply(counts_mito, 2, sum)
-hist(x = UMImito, breaks = 1000)
+#WT
+counts_mito_WT <- txi_WT$counts[listgenesmt_WT,]
+UMImito_WT <- apply(counts_mito_WT, 2, sum)
+hist(x = UMImito_WT, breaks = 1000)
+#APP
+counts_mito_APP <- txi_APP$counts[listgenesmt_APP,]
+UMImito_APP <- apply(counts_mito_APP, 2, sum)
+hist(x = UMImito_APP, breaks = 1000)
 ```
 Il faut décider d'un seuil au desssus duquel on élimine la cellule car elle exprime trop les gènes mitochondriaux et elle est donc morte. 
 
 
-SEURAT
+**SEURAT**
 Seurat redonne les opérations précédentes
 Seurat allows you to easily explore QC metrics and filter cells based on any user-defined criteria. A few QC metrics commonly used by the community include
 
@@ -70,25 +92,154 @@ Similarly, the total number of molecules detected within a cell (correlates stro
 The percentage of reads that map to the mitochondrial genome
 Low-quality / dying cells often exhibit extensive mitochondrial contamination
 We calculate mitochondrial QC metrics with the PercentageFeatureSet function, which calculates the percentage of counts originating from a set of features
-We use the set of all genes starting with mt- as a set of mitochondrial genes
+We use the set of all genes starting with mt- as a set of mitochondrial genes.
+
+On crée une matrice double 
 ```{r}
 library(dplyr)
 library(Seurat)
-seuratobj <- CreateSeuratObject(counts = txi$counts, project = "seuratTPscRNAseq", min.cells = 3, min.features = 200)
+combine_seurat=as.matrix(data.frame(cbind(txi_WT$counts,txi_APP$counts)))
+cells=as.data.frame(c(rep("WT",ncol(txi_WT$counts)),rep("APP",ncol(txi_APP$counts))))
+names(cells)="jeu"
+row.names(cells)=c(colnames(combine_seurat))
+cells
+
+seuratobj <- CreateSeuratObject(counts = combine_seurat, project = "seuratTPscRNAseq", min.cells = 3, min.features = 200, meta.data=cells)
 seuratobj
+
+#en séparant les conditions
+seurat_WT <-CreateSeuratObject(counts = txi_WT$counts, project = "seuratTPscRNAseq", min.cells = 3, min.features = 200)
+seurat_APP <-CreateSeuratObject(counts = txi_APP$counts, project = "seuratTPscRNAseq", min.cells = 3, min.features = 200)
 ```
+
+
 ```{r}
 # The [[ operator can add columns to object metadata. This is a great place to stash QC stats
+#analyse des gènes mitochondriaux
 seuratobj[["percent.mt"]] <- PercentageFeatureSet(seuratobj, pattern = "^mt-")
 summary(seuratobj[["percent.mt"]])
+
+#en séparant les deux
+seurat_WT[["percent.mt"]] <- PercentageFeatureSet(seurat_WT, pattern = "^mt-")
+summary(seurat_WT[["percent.mt"]])
+seurat_APP[["percent.mt"]] <- PercentageFeatureSet(seurat_APP, pattern = "^mt-")
+summary(seurat_APP[["percent.mt"]])
 ```
 On a une cellule avec 66% de gènes mitochondriaux !
 
 
 ```{r}
 # Visualize QC metrics as a violin plot
-VlnPlot(seuratobj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+VlnPlot(seuratobj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size=0)
+
 ```
 
 We filter cells that have unique feature counts over 2,500 or less than 200
 We filter cells that have >5% mitochondrial counts
+
+```{r}
+# FeatureScatter is typically used to visualize feature-feature relationships, but can be used
+# for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
+
+plot1 <- FeatureScatter(seuratobj, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(seuratobj, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+CombinePlots(plots = list(plot1, plot2))
+```
+```{r}
+#ensuite on sélectionne donc les cellules qu'on doit retirer
+#remarque: il y a plusieurs critères de mauvaise qualité => on aurait pu faire une PCA et regarder si ces critères correspondent au même groupe de cellules. 
+#remarque 2: il faudrait prendre le temps de jouer avec les features
+seuratobj_refine <- subset(seuratobj, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 10)
+#et on revisualise: 
+VlnPlot(seuratobj_refine, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size=0)
+plot1 <- FeatureScatter(seuratobj_refine, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(seuratobj_refine, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+CombinePlots(plots = list(plot1, plot2))
+
+
+#en séparant les conditions
+seurat_WT <- subset(seurat_WT, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 10)
+seurat_APP <- subset(seurat_APP, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 10)
+```
+Ensuite on normalise les niveaux d'expression de gènes d'une cellule par rapport aux autres gènes de la cellule:
+"we employ a global-scaling normalization method “LogNormalize” that normalizes the feature expression measurements for each cell by the total expression, multiplies this by a scale factor (10,000 by default), and log-transforms the result"
+On utilise une échele log car les variations entre les expressions des gènes sont tres importantes. 
+On passe en ratio car on efface les différences entre des pb, par exemple si une cellule est très faible (pas bpc de réactifs...) on récupère le ratio. 
+Attention il y a un biais important !! si un gène est très exprimé et change entre les cellules, alors la somme totale des gènes de chaque cellule sera affectée ! Pour du bulk-RNA seq il aurait fallu faire une somme "médiane" pour outrepasser ce biais. Nous on ne peut pas car on a que des 0 si on fait un échantillon médian ! et ce sera pareil pour des gènes différentiellement exprimés. Mais le field va progresser. 
+
+```{r}
+seuratobj_norm <- NormalizeData(seuratobj_refine, normalization.method = "LogNormalize", scale.factor = 10000)
+#j'aurai pu ne pas changer de nom, ca aurait créé moins d'objet inutile, surtout que là il rajoute juste des cases dans notre matrice existante.
+#visualisation: on ne peut pas faire le violin plot avec ça, il ne prend pas en entrée ce type de données. 
+seuratobj_norm@assays$RNA@counts[1:5,1:2] #visualisation des counts
+seuratobj_norm@assays$RNA@data[1:5,1:2] #visualtisation quand normalisé
+summary(seuratobj_norm@assays$RNA@data[,1])
+table(seuratobj_norm@assays$RNA@counts[,1]>0) # pour voir que la plupart des gènes ne sont pas exprimés, on a bcp de zéros
+
+#en séparant les deux: 
+seurat_WT <- NormalizeData(seurat_WT, normalization.method = "LogNormalize", scale.factor = 10000)
+seurat_APP <- NormalizeData(seurat_APP, normalization.method = "LogNormalize", scale.factor = 10000)
+```
+
+On va ensuite s'interesser aux high variable features, qui sont des gènes particulièrement variables entre les cellules. 
+
+```{r}
+#seuratobj <- FindVariableFeatures(seuratobj, selection.method = "vst", nfeatures = 2000, group_data(.data))
+
+#A partir d'ici on doit analyser séparément WT et APP!
+seurat_WT <- FindVariableFeatures(seurat_WT, selection.method = "vst", nfeatures = 2000)
+seurat_APP <- FindVariableFeatures(seurat_APP, selection.method = "vst", nfeatures = 2000)
+# Identify the 10 most highly variable genes
+top10_WT <- head(VariableFeatures(seurat_WT), 10)
+top10_APP <- head(VariableFeatures(seurat_APP), 10)
+top10_WT
+top10_APP
+
+# plot variable features with and without labels
+plot1_WT <- VariableFeaturePlot(seurat_WT)
+plot2_WT <- LabelPoints(plot = plot1_WT, points = top10_WT, repel = TRUE)
+plot2_WT
+plot1_APP <- VariableFeaturePlot(seurat_APP)
+plot2_APP <- LabelPoints(plot = plot1_APP, points = top10_APP, repel = TRUE)
+plot2_APP
+#CombinePlots(plots = list(plot1, plot2))
+```
+On observe quelques gènes connus: S100A8, granzyme, H2, cxcl2...
+
+On veut ensuite faire les PCA. 
+Il faut d'abord scaler les données. 
+The function: 
+- Shifts the expression of each gene, so that the mean expression across cells is 0
+- Scales the expression of each gene, so that the variance across cells is 1
+This step gives equal weight in downstream analyses, so that highly-expressed genes do not dominate
+The results of this are stored in [["RNA"]]@scale.data
+
+```{r}
+all.genes_WT <- rownames(seurat_WT)
+seurat_WT <- ScaleData(seurat_WT, features = all.genes_WT)
+all.genes_APP <- rownames(seurat_APP)
+seurat_APP <- ScaleData(seurat_APP, features = all.genes_APP)
+
+```
+
+Then we can do the linear dimensional reduction
+```{r}
+seurat_WT <- RunPCA(seurat_WT)
+seurat_APP <- RunPCA(seurat_APP)
+
+# We examine and visualize PCA results in a few different ways
+print(seurat_WT[["pca"]], dims = 1:5, nfeatures = 5)
+print(seurat_APP[["pca"]], dims = 1:5, nfeatures = 5)
+
+```
+```{r}
+VizDimLoadings(seurat_WT, dims = 1:2, reduction = "pca")
+VizDimLoadings(seurat_APP, dims = 1:2, reduction = "pca")
+```
+```{r}
+DimPlot(seurat_WT, reduction = "pca")
+DimPlot(seurat_APP, reduction = "pca")
+```
+
+
+
