@@ -2,6 +2,8 @@
 
 L'objectif de ce TP est de réanalyser une partie des données obtenue par Van Hove et al. en 2019. Cette équipe a étudié l'écosystème immunitaire du cerveau par single-cell RNA sequencing. Nous nous interessont uniquement aux cellules immunitaires (CD45+) dans les conditions sauvages et dans la condition APP/PS1 qui est un modèle de la maladie d'Alzheimer. 
 
+Petite précision: après ce readme qui correspond au téléchargement des données et à la mise en place de l'Alevin, l'analyse des données à été réalisée grâce à Seurat et se trouve dans les documents analyse des données et analyse des données - suite. 
+
 **5/11/19**
 **Lancement des machines et téléchargement des données, mise en place du git.**
 
