@@ -1,0 +1,135 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+Résumé des étapes précédentes : on a analysé la qualité des données manuellement puis grâce à la création d'un objet seurat qui nous a permis de filtrer les données. On a ensuite préparé les données pour l'analyse. En revanche on a besoin d'un objet seurat unique contenant les deux conditions (WT et APP) dans le même objet. Du fait de la panne des serveurs, cela a été réalisé ici. 
+
+**création de l'objet seurat combiné**
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+library(tximport)
+library(scater)
+library(ggplot2)
+library(reshape2)
+library(Seurat)
+library(dplyr)
+
+# Reading in the alevin quants quants
+
+txi_WT_quant <- file.path("/home/rstudio/disk/data/genome/alevin_output_WT/alevin/quants_mat.gz")
+file.exists(txi_WT_quant)
+txi_APP_quant <- file.path("/home/rstudio/disk/data/genome/alevin_output_APPPS1/alevin/quants_mat.gz")
+file.exists(txi_APP_quant)
+# Reading in the alevin quants quants
+txi_WT <- tximport(txi_WT_quant, type="alevin")
+txi_APP <- tximport(txi_APP_quant, type="alevin")
+
+rawData=as.matrix(data.frame(cbind(txi_WT$counts,txi_APP$counts))) 
+
+#création de la metadata gardant l'information de condition correspondant à chaque cellule
+cells=c(rep("WT",ncol(txi_WT$counts)),rep("APP",ncol(txi_APP$counts))) 
+
+metaData <- data.frame("cells"=colnames(rawData),
+       row.names="cells",stringsAsFactors=FALSE)
+
+metaData$orig.ident <- cells
+table(metaData$orig.ident)
+
+seuratObj <-CreateSeuratObject(counts = rawData, project = "seuratTPscRNAseq", min.cells = 3, min.features = 200, meta.data=metaData)# creation de l'objet combiné avec les metadata modifiées
+
+#nettoyage et normalisation
+seuratObj[["percent.mt"]] <- PercentageFeatureSet(seuratObj, pattern = "^mt-")
+summary(seuratObj[["percent.mt"]])
+seuratObj <- subset(seuratObj, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 10)
+seuratObj <- NormalizeData(seuratObj, normalization.method = "LogNormalize", scale.factor = 10000)
+seuratObj@assays$RNA@data[1:5,1:2]
+```
+
+**Variable features**
+On recherche à nouveau les features variables. Comme précédement cela n'est pas forcément très informatif car toutes les cellues sont mélangées. 
+```{r cars}
+seuratObj <- FindVariableFeatures(object=seuratObj, selection.method="vst",nfeatures=2000)
+cat("Found",length(VariableFeatures(seuratObj)),"high variable genes\n")
+top10<- head(VariableFeatures(seuratObj),10)
+top10
+```
+
+**Scaling et PCA**
+```{r cars}
+#scaling
+all.genes <- rownames(seuratObj)
+seuratObj <- ScaleData(seuratObj, features = all.genes)
+seuratObj <- RunPCA(seuratObj, features=VariableFeatures(object=seuratObj))
+#visualisation de notre PCA:
+print(seuratObj[["pca"]], dims=1:5, nfeatures=5)
+DimPlot(seuratObj, reduction = "pca")
+```
+
+**determination de la dimensionalité de la PCA**
+On doit déterminer quelles sont les composents informatifs de la PCA. =déterminer la dimensionalité. En effet, une PCA trouve des axes qui permettent de décrire les données en 2D et d'expliquer les différences entre les cellules. D'habitude on ne regarde que les dimensions 1 et 2 mais ici on va utiliser ces axes de PCA pour le UMAP ou le t-SNE. En effet, une PCA n'est pas visuelle. On a besoin d'autre moyens pour éclater les données qui sont des représentation t-SNE ou UMAP. Dans ces modes de visualisation, on calcule la distance entre chaque cellule et on regroupe les cellules qui ont (plus ou moins, et ce paramètre est à définir) les mêmes voisins. En revanche, le clustering est réalisé grace aux statistiques de la PCA. On veut savoir combien d'axes ou dimensions il faut prendre en compte pour bien expliquer les différences dans les données. Le graphe elbow donne le pourcentage de variance expliqué par chacun des axes. Quand ca devient proche de 0, ca n'explique plus la différence.
+D'après les résultats du JackStrawPlot et du ElbowPlot, on sélectionne les 15 premières dimensions pour la suite de l'analyse. 
+Le clustering est ensuite réalisé grace à l'algorithme FindNeighbors et FindClusters. On définit r la perplexité; une perplexité haute donne beaucoup de clusters tandisqu'une perplexité plus basse donne moins de clusters. 
+
+```{r cars}
+seuratObj<- JackStraw(seuratObj, num.replicate = 100)
+seuratObj <- ScoreJackStraw(seuratObj, dims = 1:20)
+JackStrawPlot(seuratObj, dims = 1:15)
+ElbowPlot(seuratObj)
+#on sélectionne les 15 premières PC (principal component) pour la suite de l'analyse. 
+#clustering: on utilise l'algorithme findneigbours
+seuratObj <- FindNeighbors(seuratObj, dims = 1:15)
+seuratObj <- FindClusters(seuratObj, resolution = 0.4)#r=0.4 => 16 cluster r=1 => 22 clusters.
+
+head(Idents(seuratObj),5)#visualisation
+```
+
+On peut donc choisir maintenant de visualiser les données soit avec t-SNE, soit avec UMAP. On choisit t-SNE, plus visuel. 
+```{r}
+#visualisation en t-SNE
+seuratObj <- RunUMAP(seuratObj, dims = 1:15)
+DimPlot(seuratObj, reduction="umap")
+seuratObj <-RunTSNE(seuratObj,dims=1:15)
+DimPlot(seuratObj, reduction="tsne")
+
+#en dégroupant wt et app: permet d'observer les clusters uniques pour l'une ou l'autre des conditions. 
+DimPlot(seuratObj, reduction="tsne",group.by="orig.ident") 
+
+```
+
+On peut maintenant attaquer l'analyse de données à part entière. Cela est le code correspondant aux images montrées lors de la présentation. 
+FindMarkers permet d'obtenir les marqueurs d'un cluster. 
+```{r}
+
+#On cherche les markers du cluster 12 qui a l'air unique au WT et le 3 qui a l'air unique au APP
+cluster12.markers <- FindMarkers(seuratObj, ident.1 = 12, min.pct = 0.25)
+head(cluster12.markers, n = 10)
+cluster3.markers <- FindMarkers(seuratObj, ident.1 = 3, min.pct = 0.25)
+head(cluster3.markers, n = 100)
+
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+seuratObj.markers <- FindAllMarkers(seuratObj, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+seuratObj.markers  %>% group_by(cluster) %>% top_n(n = 4, wt = avg_logFC)
+
+grep(x=all.genes, "Trem2") #pour chercher les différentes versions d'un gène x d'intérêt
+all.genes[5374]
+all.genes[7392]
+all.genes[11739]
+all.genes[11740]
+Features(seuratObj)
+VlnPlot(seuratObj, features = c("Ly6c2", "Cd3e")) #violin plot sur certains gènes d'intêrets, observation de la distribution dans les clusters
+VlnPlot(seuratObj, features = "Trem2")
+#genes propres au groupe 3
+FeaturePlot(seuratObj, reduction ="tsne", features = c("Cst7", "Apoe", "Ccl4", "Spp1")) #visualisation de gènes spécifiques au cluster 3 sur la visualisation en t-sne
+#genes propres au groupe 12
+FeaturePlot(seuratObj, reduction ="tsne", features = c("Ngp", "Camp", "S100a8", "S100a9"))
+FeaturePlot(seuratObj, reduction ="tsne", features = "Trem2")
+trem=FeaturePlot(seuratObj, reduction ="tsne", features = "Trem2",split.by="orig.ident") #split du t-sne par condition (points WT et APP de couleurs différentes), permet la comparaison de la distribution d'un gène d'intêret. 
+
+```
+Résumé des "trouvailles" : on a pu redéfinir chaque cluster comme correspondant à un groupe de cellules, défini par des marqueurs classiques, comme dans le papier proposé. On a aussi pu comparer les niveaux d'expression de certains gènes dans certains clusters et l'existence même de certains clusters dans les conditions WT et APP.
+
+Mais surtout, on a appris a réaliser une analyse de données scRNA-seq du début à la fin.
+Merci encore pour ce TP extrêmement formateur !

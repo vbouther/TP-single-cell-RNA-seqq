@@ -98,21 +98,19 @@ Seurat allows you to easily explore QC metrics and filter cells based on any use
 We calculate mitochondrial QC metrics with the PercentageFeatureSet function, which calculates the percentage of counts originating from a set of features
 We use the set of all genes starting with mt- as a set of mitochondrial genes.
 
-On crée deux objets seurat séparés pour les conditions WT et APP mais cela ne permet pas de visualiser sur un même graphe les deux conditions et ni de les comparer. En revanche pour l'analyse de la qualité des données c'est interessant d'avoir les deux séparés. C'est aussi utile pour récupérer les highly variable features dans les deux conditions (voir suite). 
-Pour pouvoir comparer les données des deux conditions, on crée une matrice de comptes double contenant à la fois les comptes de la condition WT et ceux de la condition APP. On crée ensuite un objet seurat à partir de cette matrice pour l'analyser. On utilise la forme de cet objet seurat pour ajouter l'information "WT" ou "APP" dans les metadata. On crée donc un data.frame contenant l'information qu'on va ajouter dans les metadata lors de la création de l'objet. Cela permettra d'analyser les données en conservant les deux conditions.
-Remarque: ce second objet seurat a été créé dans un autre document du fait de la panne des serveurs (analyse de données suite.rmd) (voir suite).
-
+On crée une matrice de comptes double contenant à la fois les comptes de la condition WT et ceux de la condition APP. On crée ensuite un objet seurat à partir de cette matrice pour l'analyser. On utilise la forme de cet objet seurat pour ajouter l'information "WT" ou "APP" dans les metadata. On crée donc un data.frame contenant l'information qu'on va ajouter dans les metadata lors de la création de l'objet. Cela permettra d'analyser les données en conservant les deux conditions.
+Remarque: on crée aussi deux objets seurat séparés mais cela ne permet pas de visualiser sur un même graphe les deux conditions et ni de les comparer. C'est pourquoi on a créé cet unique objet en regroupant les conditions mais en conservant l'information. En revanche pour l'analyse de la qualité des données c'est interessant d'avoir les deux séparés. C'est aussi utile pour récupérer les highly variable features dans les deux conditions (voir suite). 
 ```{r}
 library(dplyr)
 library(Seurat)
-#combine_seurat=as.matrix(data.frame(cbind(txi_WT$counts,txi_APP$counts))) # creation of a count matrix with WT and APP conditions
-#cells=as.data.frame(c(rep("WT",ncol(txi_WT$counts)),rep("APP",ncol(txi_APP$counts)))) # creation of the metadata indicating the origin of the data for the seurat object
-#names(cells)="jeu"
-#row.names(cells)=c(colnames(combine_seurat))
-#cells #visualisation
+combine_seurat=as.matrix(data.frame(cbind(txi_WT$counts,txi_APP$counts))) # creation of a count matrix with WT and APP conditions
+cells=as.data.frame(c(rep("WT",ncol(txi_WT$counts)),rep("APP",ncol(txi_APP$counts)))) # creation of the metadata indicating the origin of the data for the seurat object
+names(cells)="jeu"
+row.names(cells)=c(colnames(combine_seurat))
+cells #visualisation
 
-#seuratobj <- CreateSeuratObject(counts = combine_seurat, project = "seuratTPscRNAseq", min.cells = 3, min.features = 200, meta.data=cells) #creation of the seurat object
-#seuratobj 
+seuratobj <- CreateSeuratObject(counts = combine_seurat, project = "seuratTPscRNAseq", min.cells = 3, min.features = 200, meta.data=cells) #creation of the seurat object
+seuratobj 
 
 #en séparant les conditions
 seurat_WT <-CreateSeuratObject(counts = txi_WT$counts, project = "seuratTPscRNAseq", min.cells = 3, min.features = 200)
@@ -123,8 +121,8 @@ Analyse des pourcentages de gènes mitochondriaux: on ajoute cette information d
 ```{r}
 # The [[ operator can add columns to object metadata. This is a great place to stash QC stats
 #analyse des gènes mitochondriaux
-#seuratobj[["percent.mt"]] <- PercentageFeatureSet(seuratobj, pattern = "^mt-")
-#summary(seuratobj[["percent.mt"]])
+seuratobj[["percent.mt"]] <- PercentageFeatureSet(seuratobj, pattern = "^mt-")
+summary(seuratobj[["percent.mt"]])
 
 #en séparant les deux
 seurat_WT[["percent.mt"]] <- PercentageFeatureSet(seurat_WT, pattern = "^mt-")
@@ -137,7 +135,7 @@ On a une cellule avec 66% de gènes mitochondriaux !
 On peut visualiser nos données de qualité en violin plot: 
 ```{r}
 # Visualize QC metrics as a violin plot
-#VlnPlot(seuratobj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size=0)
+VlnPlot(seuratobj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size=0)
 
 ```
 Ou grace à FeatureScatter: 
@@ -145,9 +143,9 @@ Ou grace à FeatureScatter:
 # FeatureScatter is typically used to visualize feature-feature relationships, but can be used
 # for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
 
-#plot1 <- FeatureScatter(seuratobj, feature1 = "nCount_RNA", feature2 = "percent.mt")
-#plot2 <- FeatureScatter(seuratobj, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
-#CombinePlots(plots = list(plot1, plot2))
+plot1 <- FeatureScatter(seuratobj, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(seuratobj, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+CombinePlots(plots = list(plot1, plot2))
 ```
 On filtre les cellules:
 - ayant plus de 2500 gènes uniques ou moins de 200
@@ -159,12 +157,12 @@ Remarque 2: il faudrait prendre le temps de jouer avec les features
 ```{r}
 #Filtering of the cellls
 
-#seuratobj_refine <- subset(seuratobj, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 10)
+seuratobj_refine <- subset(seuratobj, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 10)
 #et on revisualise: 
-#VlnPlot(seuratobj_refine, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size=0)
-#plot1 <- FeatureScatter(seuratobj_refine, feature1 = "nCount_RNA", feature2 = "percent.mt")
-#plot2 <- FeatureScatter(seuratobj_refine, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
-#CombinePlots(plots = list(plot1, plot2))
+VlnPlot(seuratobj_refine, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size=0)
+plot1 <- FeatureScatter(seuratobj_refine, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(seuratobj_refine, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+CombinePlots(plots = list(plot1, plot2))
 
 #en séparant les conditions
 seurat_WT <- subset(seurat_WT, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 10)
@@ -179,14 +177,14 @@ Ensuite on normalise les niveaux d'expression de gènes d'une cellule par rappor
 Attention, ici il y a un biais important: si un gène est très exprimé et change entre les cellules, alors la somme totale des gènes de chaque cellule sera affectée ! Pour du bulk-RNA seq il aurait fallu faire une somme "médiane" pour outrepasser ce biais. Nous on ne peut pas car on a que des 0 si on fait un échantillon médian : en scRNA-seq, on capte un grand nombre de gènes très faiblement exprimés. Pour le moment, c'est donc la seule solution, mais cela va sans doute évoluer. 
 
 ```{r}
-#seuratobj_norm <- NormalizeData(seuratobj_refine, normalization.method = "LogNormalize", scale.factor = 10000)
+seuratobj_norm <- NormalizeData(seuratobj_refine, normalization.method = "LogNormalize", scale.factor = 10000)
 #Remarque: ici j'aurai pu ne pas changer de nom, ca aurait créé moins d'objet inutile, ici il rajoute juste des cases dans notre matrice existante.
 
 #visualisation: on ne peut pas faire le violin plot avec ce type de données. 
-#seuratobj_norm@assays$RNA@counts[1:5,1:2] #visualisation des counts
-#seuratobj_norm@assays$RNA@data[1:5,1:2] #visualtisation quand normalisé
-#summary(seuratobj_norm@assays$RNA@data[,1])
-#table(seuratobj_norm@assays$RNA@counts[,1]>0) # pour voir que la plupart des gènes ne sont pas exprimés, on a bcp de zéros
+seuratobj_norm@assays$RNA@counts[1:5,1:2] #visualisation des counts
+seuratobj_norm@assays$RNA@data[1:5,1:2] #visualtisation quand normalisé
+summary(seuratobj_norm@assays$RNA@data[,1])
+table(seuratobj_norm@assays$RNA@counts[,1]>0) # pour voir que la plupart des gènes ne sont pas exprimés, on a bcp de zéros
 
 #en séparant les deux: 
 seurat_WT <- NormalizeData(seurat_WT, normalization.method = "LogNormalize", scale.factor = 10000)

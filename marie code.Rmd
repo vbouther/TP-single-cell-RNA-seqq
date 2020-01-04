@@ -1,0 +1,199 @@
+---
+title: "FionaEtValentine"
+author: "marie"
+date: "17 décembre 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### CODE IMPORT MARIE
+
+```{r}
+library(tximport)
+library(scater)
+library(ggplot2)
+library(reshape2)
+library(Seurat)
+library(dplyr)
+
+
+#files <- file.path("data_local/count_data/alevin_output/alevin/quants_mat.gz")
+listsamples <- list.files("/home/msemon/Documents/Enseignement/Enseignement/CoursM2/UENGSPratique/ProjetSingleCell/Alevin_separated/")
+listsamples1 <- file.path("/home/msemon/Documents/Enseignement/Enseignement/CoursM2/UENGSPratique/ProjetSingleCell/Alevin_separated",listsamples)
+files <- sapply(listsamples1,function(x){file.path(x,"alevin/quants_mat.gz")})
+coldata <- data.frame(files, names=listsamples, condition=c("WT","APP/PS1"), stringsAsFactors=FALSE)
+coldata
+head(coldata)
+```
+
+```{r}
+# Reading in the alevin quants quants
+# At the moment it is not possible to load several results of alevin at the same time with tximport nor tximeta
+txi1 <- tximport(files[1], type="alevin")
+names(txi1)
+dim(txi1$counts)
+rawData1=txi1$counts
+
+txi2 <- tximport(files[2], type="alevin")
+names(txi2)
+dim(txi2$counts)
+rawData2=txi2$counts
+```
+
+## la je mets mon propre code
+```{r}
+txi_WT_quant <- file.path("/home/rstudio/disk/data/genome/alevin_output_WT/alevin/quants_mat.gz")
+file.exists(txi_WT_quant)
+txi_APP_quant <- file.path("/home/rstudio/disk/data/genome/alevin_output_APPPS1/alevin/quants_mat.gz")
+file.exists(txi_APP_quant)
+# Reading in the alevin quants quants
+txi_WT <- tximport(txi_WT_quant, type="alevin")
+txi_APP <- tximport(txi_APP_quant, type="alevin")
+
+rawData=as.matrix(data.frame(cbind(txi_WT$counts,txi_APP$counts)))
+#####pb pr la ligne d'en dessous
+cells=c(rep("WT",ncol(txi_WT$counts)),rep("APP",ncol(txi_APP$counts)))
+
+
+#la c'est des vérifications
+# Create SingleCellExperiment-object
+sce <- SingleCellExperiment(list(counts = rawData))
+
+### The dimensions of the Sce (dimSce) should be the same as the dimensions of
+### the raw data.
+diagnostics[["dimSce"]] <- paste0(nrow(sce), " genes - ", ncol(sce), " cells")
+
+## Get spike inns
+is.spike <- grepl("^ERCC-", rownames(sce))
+cat("Number of spike-inns: ", sum(is.spike), "\n")
+
+### The dimensions of the Sce (dimSce) should be the same as the dimensions of the raw data.
+diagnostics[['dimSce']] <- paste0(nrow(sce)," genes - ",ncol(sce)," cells")
+
+## Get the names of the mitochondrial genes (using ensembl biomart).
+mito=read.table("../mitoGenes.txt",h=T,sep="\t")
+#mito=read.table("data_local/raw_data/transcriptome/mitoGenes.txt",h=T,sep="\t")
+
+is.mito <- rownames(sce)%in%mito$Gene.name
+cat("Number of mitochondrial genes: ",
+    sum(is.mito),"\n")
+
+#These genes are used to identify unhealthy cells. 
+#When cells apoptose due to stress, their mitochondria become leaky and there is widespread RNA-degradation. 
+#So enrichment of mitochondrial transcripts is a sign of cell stress. 
+
+##### Using the calculateQCMetrics() of the Scater package, quality control metrics can be calculated for each cell.
+# input is SCESet object
+# feature_controls: a named list (objects in the list have naes) of gene names used to identify control genes (mitochondrial genes...). 
+### => pData(sce) is created
+sce <- calculateQCMetrics(sce, feature_controls=list(Mt=is.mito))
+colnames(colData(sce))
+# 36 quality metrics are calculated for every cell
+```
+
+```{r}
+
+##### Create metaData matrix (used for downstream analysis)
+metaData <- data.frame("cells"=colnames(rawData),
+       "nGene"=sce$total_features_by_counts,
+       "nUMI"=sce$total_counts,
+       "percent.mito"=sce$pct_counts_Mt,
+       row.names="cells",stringsAsFactors=FALSE)
+
+
+### cell type
+metaData$orig.ident <- cells
+table(metaData$orig.ident)
+
+##### Add to diagnostics #####
+diagnostics[['splitSamples']] <- paste0(table(metaData$orig.ident), " cells of sample #",rownames(table(metaData$orig.ident)))
+
+```
+
+
+## VariableFeatures
+
+
+```{r cars}
+seuratObj <- FindVariableFeatures(object=seuratObj, selection.method="vst",nfeatures=2000)
+cat("Found",length(VariableFeatures(seuratObj)),"high variable genes\n")
+top10<- head(VariableFeatures(seuratObj),10)
+top10
+#scaling
+all.genes <- rownames(seuratObj)
+seuratObj <- ScaleData(seuratObj, features = all.genes)
+seuratObj <- RunPCA(seuratObj, features=VariableFeatures(object=seuratObj))
+#visualisation de notre PCA:
+print(seuratObj[["pca"]], dims=1:5, nfeatures=5)
+DimPlot(seuratObj, reduction = "pca")
+
+#On doit déterminer quelles sont les composents informatifs de la PCA. =déterminer la dimensionalité. Pour cela :
+seuratObj<- JackStraw(seuratObj, num.replicate = 100)
+seuratObj <- ScoreJackStraw(seuratObj, dims = 1:20)
+JackStrawPlot(seuratObj, dims = 1:15)
+ElbowPlot(seuratObj)
+#on sélectionne les 15 premières PC (principal component) pour la suite de l'analyse. 
+#clustering: on utilise l'algorythme findneigbours
+seuratObj <- FindNeighbors(seuratObj, dims = 1:15)
+seuratObj <- FindClusters(seuratObj, resolution = 0.4)
+#avec cette résolution on trouve 16 cluster parmis nos cellules. r=C'est la perplexité. Avec une résolution = perplexité de 1 on en avait 22.
+#ppour les voir un peu:
+head(Idents(seuratObj),5)
+```
+Explications:
+PCA: trouver des axes qui permettent de décrire les données en 2D. Grandes dimensions permettant d'expliquer les différences entre les cellules. D'habitude on regarde que 1 et 2 mais ici on aimerait utiliser ces axes de PCA pour le UMAP. On veut savoir combien. Donne explicabilité des resultats.
+Elbow: pourcentage de variance expliqué par chacun des axes. Quand ca devient proche de 0, ca n'explique plus la différence.
+NB: c'est bien les axes d'APC qu'on utiliqe pour faire les clusters. Ca donne des statistiques. Pourquoi? PCA moins visuelle, n'éclate pas les choses, on reste en gradients. tSNE: bonne visualisation des groupes mais pour définir les clusters on doit utiliser les PCA axes. 
+On calcule la distance en tre chauqe cellule et on regroupe les cellules qui ont (plus ou moins) les mêmes voisins
+```{r}
+#visualisation en t-SNE
+seuratObj <- RunUMAP(seuratObj, dims = 1:15)
+DimPlot(seuratObj, reduction="umap")
+seuratObj <-RunTSNE(seuratObj,dims=1:15)
+DimPlot(seuratObj, reduction="tsne")
+
+#en dégroupant <wt et app
+DimPlot(seuratObj, reduction="tsne",group.by="orig.ident")
+
+```
+
+```{r}
+
+#On cherche les markers du cluster 12 qui a l'air unique au WT et le 3 qui a l'air unique au APP
+cluster12.markers <- FindMarkers(seuratObj, ident.1 = 12, min.pct = 0.25)
+head(cluster12.markers, n = 10)
+cluster3.markers <- FindMarkers(seuratObj, ident.1 = 3, min.pct = 0.25)
+head(cluster3.markers, n = 100)
+
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+seuratObj.markers <- FindAllMarkers(seuratObj, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+seuratObj.markers  %>% group_by(cluster) %>% top_n(n = 4, wt = avg_logFC)
+grep(x=all.genes, "Trem2")
+all.genes[5374]
+all.genes[7392]
+all.genes[11739]
+all.genes[11740]
+Features(seuratObj)
+VlnPlot(seuratObj, features = c("Ly6c2", "Cd3e"))
+VlnPlot(seuratObj, features = "Trem2")
+#genes propres au groupe 3
+FeaturePlot(seuratObj, reduction ="tsne", features = c("Cst7", "Apoe", "Lpl", "Spp1"))
+#genes propres au groupe 12
+FeaturePlot(seuratObj, reduction ="tsne", features = c("Lcn2", "Ngp", "Camp", "S100a8"))
+FeaturePlot(seuratObj, reduction ="tsne", features = "Trem2")
+trem=FeaturePlot(seuratObj, reduction ="tsne", features = "Trem2",split.by="orig.ident")
+FeaturePlot(seuratObj, reduction ="tsne", features = "Ly6g",split.by="orig.ident")
+FeaturePlot(seuratObj, reduction ="tsne", features = "Cd19",split.by="orig.ident")
+
+#marqueur CD8
+FeaturePlot(seuratObj, reduction ="tsne", features = c("Cd8b1","Cd8a"), split.by="orig.ident")
+#marqueur cellules naive et memry B cells
+FeaturePlot(seuratObj, reduction ="tsne", features = c("Ccr7", "Cd19"), split.by="orig.ident")
+#marqueur NK cells
+FeaturePlot(seuratObj, reduction ="tsne", features= "Klrb1c", split.by="orig.ident")
+#marqueur microglia
+FeaturePlot(seuratObj, reduction ="tsne", features= c("Cd8a","Tmem119"), split.by="orig.ident")
+```

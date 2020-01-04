@@ -1,0 +1,818 @@
+---
+title: "correction"
+output: html_document
+---
+---
+title: "scRNA_analysis.Rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Install and load the libraries
+
+```{r}
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("scater")
+# BiocManager::install("tximport")
+# install.packages("mvoutlier")
+
+library(tximport)
+library(scater)
+library(ggplot2)
+library(reshape2)
+library(Seurat)
+library(dplyr)
+```
+
+## Load the data
+
+Take the raw counts. How many cells are found? How are the cells labelled?
+
+```{r , echo=FALSE}
+
+#files <- file.path("data_local/count_data/alevin_output/alevin/quants_mat.gz")
+listsamples <- list.files("/home/msemon/Documents/Enseignement/Enseignement/CoursM2/UENGSPratique/ProjetSingleCell/Alevin_separated/")
+listsamples1 <- file.path("/home/msemon/Documents/Enseignement/Enseignement/CoursM2/UENGSPratique/ProjetSingleCell/Alevin_separated",listsamples)
+files <- sapply(listsamples1,function(x){file.path(x,"alevin/quants_mat.gz")})
+coldata <- data.frame(files, names=listsamples, condition=c("WT","APP/PS1"), stringsAsFactors=FALSE)
+coldata
+head(coldata)
+
+# Reading in the alevin quants quants
+# At the moment it is not possible to load several results of alevin at the same time with tximport nor tximeta
+txi1 <- tximport(files[1], type="alevin")
+names(txi1)
+dim(txi1$counts)
+rawData1=txi1$counts
+
+txi2 <- tximport(files[2], type="alevin")
+names(txi2)
+dim(txi2$counts)
+rawData2=txi2$counts
+
+rawData=as.matrix(data.frame(cbind(rawData1,rawData2)))
+cells=c(rep(coldata$condition[1],ncol(rawData1)),rep(coldata$condition[2],ncol(rawData2)))
+
+```
+
+## Prepare the diagnostics of the cells.
+
+```{r}
+# Create an empty list called ‘Diagnostics’ which you can fill with
+# information to extract and compile a small summary report at the end of
+# your analysis.
+diagnostics <- list()
+
+##### What percentage of data is 0? #####
+nrZeros <- sum(rawData == 0)/(nrow(rawData) * ncol(rawData)) * 100
+cat("\nPercentage zeros: ", nrZeros, "\n")
+
+##### In each cell: how many genes are expressed? (count > 0) #####
+cellCounts <- apply(rawData, 2, function(x) {
+   sum(x > 0)
+})
+
+
+cat("Number of cells with < 200 genes: ", length(cellCounts[cellCounts < 200]), 
+    "\n")
+
+##### For each gene: in how many cells is it expressed? (count > 0) #####
+geneCounts <- apply(rawData, 1, function(x) {
+    sum(x > 0)
+})
+cat("Number of genes expressed > 3 cells: ", length(geneCounts[geneCounts < 
+    3]), "\n")
+
+##### Add this information and calculate other metrics such as the average of
+##### genes per cell, add this information to diagnostics #####
+diagnostics[["dimRawData"]] <- paste0(nrow(rawData), " genes - ", ncol(rawData), 
+    " cells")
+diagnostics[["nrGenes"]] <- nrow(rawData)
+diagnostics[["nrCells"]] <- ncol(rawData)
+diagnostics[["zeroInflation"]] <- nrZeros
+
+diagnostics[["minGenesPerCell"]] <- min(cellCounts)
+diagnostics[["maxGenesPerCell"]] <- max(cellCounts)
+diagnostics[["meanGenesPerCell"]] <- mean(cellCounts)
+diagnostics[["medianGenesPerCell"]] <- median(cellCounts)
+diagnostics[["cellsLess200genes"]] <- length(cellCounts[cellCounts < 200])
+diagnostics[["genesNotExpressed"]] <- length(geneCounts[geneCounts == 0])
+diagnostics[["genesLess3cells"]] <- length(geneCounts[geneCounts < 3])
+```
+
+
+## Quality control of the cells uting scater package
+
+ The raw data is loaded into a special kind of class commonly used for
+single cell analysis: the Sce object (SingleCellExperiment)
+
+
+```{r}
+
+# Create SingleCellExperiment-object
+sce <- SingleCellExperiment(list(counts = rawData))
+
+
+### The dimensions of the Sce (dimSce) should be the same as the dimensions of
+### the raw data.
+diagnostics[["dimSce"]] <- paste0(nrow(sce), " genes - ", ncol(sce), " cells")
+
+## Get spike inns
+is.spike <- grepl("^ERCC-", rownames(sce))
+cat("Number of spike-inns: ", sum(is.spike), "\n")
+
+
+
+### The dimensions of the Sce (dimSce) should be the same as the dimensions of the raw data.
+diagnostics[['dimSce']] <- paste0(nrow(sce)," genes - ",ncol(sce)," cells")
+
+## Get the names of the mitochondrial genes (using ensembl biomart).
+mito=read.table("../mitoGenes.txt",h=T,sep="\t")
+#mito=read.table("data_local/raw_data/transcriptome/mitoGenes.txt",h=T,sep="\t")
+
+is.mito <- rownames(sce)%in%mito$Gene.name
+cat("Number of mitochondrial genes: ",
+    sum(is.mito),"\n")
+
+#These genes are used to identify unhealthy cells. 
+#When cells apoptose due to stress, their mitochondria become leaky and there is widespread RNA-degradation. 
+#So enrichment of mitochondrial transcripts is a sign of cell stress. 
+
+##### Using the calculateQCMetrics() of the Scater package, quality control metrics can be calculated for each cell.
+# input is SCESet object
+# feature_controls: a named list (objects in the list have naes) of gene names used to identify control genes (mitochondrial genes...). 
+### => pData(sce) is created
+sce <- calculateQCMetrics(sce, feature_controls=list(Mt=is.mito))
+colnames(colData(sce))
+# 36 quality metrics are calculated for every cell
+
+##### Create metaData matrix (used for downstream analysis)
+metaData <- data.frame("cells"=colnames(rawData),
+       "nGene"=sce$total_features_by_counts,
+       "nUMI"=sce$total_counts,
+       "percent.mito"=sce$pct_counts_Mt,
+       row.names="cells",stringsAsFactors=FALSE)
+
+### cell type
+metaData$orig.ident <- cells
+table(metaData$orig.ident)
+
+##### Add to diagnostics #####
+diagnostics[['splitSamples']] <- paste0(table(metaData$orig.ident), " cells of sample #",rownames(table(metaData$orig.ident)))
+
+
+```
+
+
+
+## Detect the outliers of cells using univariate analysis
+
+
+```{r}
+
+# Next, we will determine the outlier cells that have a low number of genes (or UMIs) expressed, or cells with a high percentage of mitochondrial transcripts. 
+# Cells with few expressed genes / small library sizes are of low quality as the transcript population (RNA) has not been efficiently captured (i.e., converted into cDNA and amplified). 
+# High proportions of mitochondrial transcripts indicate poor-quality cells because of apoptosis and loss of cytoplasmic RNA from lysed cells.
+
+# We use the function ‘isOutlier’ from the scater package to calculate the number of outlier cells for each metric. 
+# We consider cells as outliers having log-library sizes or %mito.genes > a defined number of median absolute deviations (MADs) below the median.
+# First MADs have to be defined (trial-and-error!):
+# Drop cells with very few or very many expressed genes: Same as nGene in Seurat pipeline
+nmad_low_feature <- 4
+nmad_high_feature <- 4
+
+# Drop cells with very small or large library sizes: Same as nUMI in Seurat pipeline
+nmad_low_UMI <- 3
+nmad_high_UMI <- 2
+
+# Drop cells with very high mitochondrial counts
+# The proportion of transcripts of mitochondrial origin was computed for every cell (pct_counts_Mt)
+nmad_high_mito <- 3
+
+# Now the parameters for nmads have been set, the calculation can be performed using the ‘isOutlier’ function.
+# The precalculated metrics (above) which are stored in the sce object are used as input.
+# Note: visual inspection of the plots is needed to interpret/adjust the parameters if needed and recalculate outliers.
+
+#####
+##1## Determine which cells are outliers with too low (feature.drop.low) or too high (feature.drop.high) expressed genes
+#####
+# input: numeric vector of values for a metric
+# nmads: number of MADs away from median required for a value to be called an outlier: the lower this value the more outliers
+# type: indicates whether outliers should be looked for at both tails (default: "both") or only at the lower end ("lower") or the higher end ("higher")
+# log: should the values of the metric be transformed to log10 scale before computing MAD for outlier detection?
+feature.drop.low <- isOutlier(sce$total_features_by_counts,
+                              nmads=nmad_low_feature,
+                              type="lower",log=TRUE)
+sum(feature.drop.low)
+
+feature.drop.high <- isOutlier(sce$total_features_by_counts,
+                             nmads=nmad_high_feature,
+                             type="higher",log=TRUE)
+sum(feature.drop.high)
+
+feature.drop<-as.logical(feature.drop.low + feature.drop.high)
+sum(feature.drop)
+
+#####
+
+##2## Determine which cells are outliers with too low (libsize.drop.low) or too high (libsize.drop.high) UMIs (= library size).
+#####
+
+libsize.drop.low <- isOutlier(sce$total_counts, nmads=nmad_low_UMI,type="lower",log=TRUE)
+sum(libsize.drop.low)
+
+libsize.drop.high <- isOutlier(sce$total_counts, nmads=nmad_high_UMI,type="higher",log=TRUE)
+sum(libsize.drop.high)
+
+libsize.drop<-as.logical(libsize.drop.low + libsize.drop.high)
+sum(libsize.drop)
+
+#####
+##3## Determine which cells are outliers with a high proportion of mitochondrial genes expressed.
+#####
+
+mito.drop <- isOutlier(sce$pct_counts_Mt, nmads=nmad_high_mito,type="higher")
+sum(mito.drop)
+
+##### Add outlier info to the metaData matrix #####
+metaData$nGene.drop <- feature.drop
+metaData$nUMI.drop <- libsize.drop
+metaData$mito.drop <- mito.drop
+metaData$final.drop <- feature.drop | libsize.drop | mito.drop
+
+##### Add outlier info to diagnostics #####
+diagnostics[['nmad.low.feature']] <- nmad_low_feature
+diagnostics[['nmad.high.feature']] <- nmad_high_feature
+diagnostics[['nmad.low.libsize']] <- nmad_low_UMI
+diagnostics[['nmad.high.libsize']] <- nmad_high_UMI
+diagnostics[['nmad.high.mito']] <- nmad_high_mito
+diagnostics[['feature.drop.low']] <- sum(feature.drop.low)
+diagnostics[['feature.drop.high']] <- sum(feature.drop.high)
+diagnostics[['feature.drop']] <- sum(feature.drop)
+diagnostics[['libsize.drop.low']] <- sum(libsize.drop.low)
+diagnostics[['libsize.drop.high']] <- sum(libsize.drop.high)
+diagnostics[['libsize.drop']] <- sum(libsize.drop)
+diagnostics[['mito.drop']] <- sum(mito.drop)
+
+```
+
+
+
+``
+
+### Univariate outlier analysis: create some plots to visualise the outliers
+
+
+```{r}
+
+####### GENERATE PLOTS FOR QUALITY CONTROL #########
+
+##nGene
+png(file="results/1a_nGene.png",width=850)
+par(mfrow=c(1,2))
+orderedMetaData <- metaData[order(metaData$nGene),]
+hist(orderedMetaData$nGene,breaks=30,main= "Histogram of nGene",xlab="nGene")
+colorsToUse <- as.factor(orderedMetaData$nGene.drop)
+barplot(orderedMetaData$nGene,col=colorsToUse, border=colorsToUse)
+dev.off()
+
+##nUMI
+png(file="results/1b_nUMI.png",width=850)
+par(mfrow=c(1,2))
+orderedMetaData <- metaData[order(metaData$nUMI),]
+hist(orderedMetaData$nUMI,breaks=30,main= "Histogram of nUMI",xlab="nUMI")
+colorsToUse <- as.factor(orderedMetaData$nUMI.drop)
+barplot(orderedMetaData$nUMI,col=colorsToUse, border=colorsToUse)
+dev.off()
+
+##percent.mito
+png(file="results/1c_percMito.png",width=850)
+    par(mfrow=c(1,2))
+    orderedMetaData <- metaData[order(metaData$percent.mito),]
+    hist(orderedMetaData$percent.mito,breaks=30,main="Histogram of percent mitochondrial",xlab="Percent mitochondrial")
+   colorsToUse <- as.factor(orderedMetaData$mito.drop)
+    barplot(orderedMetaData$percent.mito,col= colorsToUse,border=colorsToUse)
+ dev.off()
+
+####### VIOLIN PLOTS:
+### Before filtering
+metaData$tag=row.names(metaData)
+metaDatam=melt(metaData,id.vars = c("tag","nUMI.drop","mito.drop","final.drop"), measure.vars = c("nGene", "nUMI","percent.mito"))
+p <- ggplot(metaDatam, aes(x=variable, y=value))+facet_wrap(variable~.,scales="free") + geom_violin()
+ggsave(p,file="results/2a_beforefiltering.png")
+
+### After filtering
+
+p <- ggplot(metaDatam[!metaDatam$final.drop,], aes(x=variable, y=value))+facet_wrap(variable~.,scales="free") + geom_violin()
+ggsave(p,file="results/2a_afterfiltering.png")
+
+```
+
+## Univariate outlier analysis: remove outliers 
+Cells with quality values beyond the MADs thresholds are considered outliers and should be filtered out, assuming that they correspond to low-quality cells.
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+# The sce object containing the gene expression data will be replaced by the sce object in which cells marked as outliers are deleted by keeping all cells that are not identified as outlier
+sce <- sce[,!(libsize.drop | feature.drop | mito.drop)]
+
+### Number of cells removed:
+cat("Removed ",nrow(metaData) - ncol(sce)," cells")
+
+```
+
+### Multivariate analysis: detection of outliers via PCA
+A second strategy to identify outliers is using a principal component analysis on all the QC metrics for all cells (multivariate analysis). This will identify cells that have substantially different QC metrics from the others, possibly corresponding to low-quality cells.
+Outlier cells will be highlighted and can be deleted from the dataset.
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+
+########################################
+########## Create PCA for outlier detection
+########################################
+library('mvoutlier')
+selected_variables <- c("pct_counts_in_top_100_features", 
+                        "total_features_by_counts", "pct_counts_feature_control", 
+                        "total_features_by_counts_feature_control", "log10_total_counts_endogenous", 
+                        "log10_total_counts_feature_control")
+setdiff(selected_variables, colnames(colData(sce)))
+
+varsToUse<-selected_variables
+setdiff(varsToUse, colnames(colData(sce)))
+
+##### Detect bad cells #####
+sce<-runPCA(sce,use_coldata=T, detect_outliers=T, selected_variables=varsToUse)
+table(sce$outlier)
+outs<-colnames(sce)[sce$outlier]
+### Add to metaData
+metaData$pca.drop<-metaData$final.drop
+metaData[outs,which(colnames(metaData)=="pca.drop")]<-TRUE
+
+##### Color bad cells on PCA plot #####
+colorDF<-as.data.frame(cbind(colnames(sce),"1"), stringsAsFactors=F)
+rownames(colorDF)<-colorDF[,1]
+colorDF[outs,2]<-"2"
+colorDF[,2]<-as.factor(colorDF[,2])
+tmp<-colorDF[,2,drop=F]
+
+png(file="results/3a_pca.png",  width = 850, height = 642)
+plotReducedDim(sce, use_dimred = "PCA_coldata", colour_by='outlier',shape_by='outlier') + labs(title="PCA with outliers colored")
+dev.off()
+
+
+#### Remove the bad cells based on the PCA plot ####
+pca.drop<-metaData[colnames(sce),"pca.drop"]
+sum(pca.drop)
+
+##### Create violinplots ####
+##Before
+toPlot<-metaData[! metaData$final.drop,]
+
+metaDatam=melt(toPlot,id.vars = c("tag","nUMI.drop","mito.drop","final.drop"), measure.vars = c("nGene", "nUMI","percent.mito"))
+p <- ggplot(metaDatam, aes(x=variable, y=value))+facet_wrap(variable~.,scales="free") + geom_violin()
+ggsave(p,file="results/3b_beforePcaFiltering.png")
+
+### After filtering
+toPlot<-metaData[! metaData$final.drop &! metaData$pca.drop ,]
+metaDatam=melt(toPlot,id.vars = c("tag","nUMI.drop","mito.drop","final.drop"), measure.vars = c("nGene", "nUMI","percent.mito"))
+p <- ggplot(metaDatam, aes(x=variable, y=value))+facet_wrap(variable~.,scales="free") + geom_violin()
+ggsave(p,file="results/3b_afterPcaFiltering.png")
+
+
+##### Remove outlier cells ####
+sce <- sce[,!(pca.drop)]
+dim(sce)
+
+```
+
+
+## Finalize the quality control and save the sce object
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+# save sce object to file
+
+pca.drop <- metaData[colnames(sce),'pca.drop']
+sce <- sce[,!pca.drop]
+saveRDS(sce,file="results/sce.rds")
+
+rawDataFiltered <- rawData[rownames(sce),colnames(sce)]
+metaDataFiltered <- metaData[(metaData$final.drop==FALSE & metaData$pca.drop==FALSE),]
+dim(sce)
+dim(rawDataFiltered)
+dim(metaDataFiltered)
+
+### Clean up some variables
+rm(sce)
+rm(rawData)
+
+```
+
+
+
+###########################################################
+## Seurat pipeline for clustering cells 
+###########################################################
+
+After filtering low quality cells from the dataset,
+the filtered gene expression matrix will now be analysed in the seurat pipeline.
+ 
+Filtering and quality control during import of data:
+(1) Each cell should express a minimum of 200 genes (‘min.features’).
+(2) A gene should be expressed in a minimum of 3 cells (‘min.cells’).
+
+The data has to be stored in a Seurat object = complex data type with slots that store the raw data, and the results from every step in the pipeline. So you do not need to keep track of many individual variables but they are all collapsed into one single Seurat object.
+
+Seurat objects consist of a set of cells and one or more assays objects, individual sets of count data. Assays can be reduced from their high-dimensional state to a lower-dimension state and stored as DimReduc objects. Seurat objects also store meta data.
+
+Slots are accessible via @sign.
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+# CreateSeuratObject() of Seurat package
+# counts: input data
+# min.cells: remove genes expressed in less than this many cells. 
+# min.features: remove cells with less than this many genes expressed.
+# project: name of Seurat object
+seuratObj <- CreateSeuratObject(counts=rawDataFiltered,project="seuratObj",min.cells=3,min.features=200,meta.data=metaDataFiltered)
+
+### Explore object: more details on the slides.
+# Seurat objects consist of one or more assays objects
+# representing expression data
+seuratObj@assays
+
+# The counts are in the RNA object
+dim(seuratObj@assays$RNA)
+# many genes removed - no additional cells removed
+
+# Access the data
+# Seurat object < assays slot 
+# assays object < RNA object 
+# RNA object < counts slot
+# Obtain the first 5 rows (genes) and columns (cells)
+seuratObj@assays$RNA@counts[1:5,1:5]
+
+table(seuratObj@meta.data$orig.ident)
+
+
+
+```
+
+## Seurat pipeline: NORMALIZATION
+By default, Seurat uses a global-scaling normalization method (LogNormalize). It divides every count by the total number of counts in that cell, multiplies this by a scale factor (10,000 by default) and log-transforms the result.
+
+There are many methods to normalize the data, but this is the simplest and the most intuitive. 
+
+The division by total expression is done to change all counts to a relative measure since technical factors are responsible for the variation in the number of reads per cell, although biological factors also play a smaller, but non-negligible role. 
+
+Log-transformation is a commonly used transformation that has many desirable properties, such as variance stabilization.
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+?NormalizeData 
+# function of Seurat package:
+# normalization.method: default is log-normalization, 2 other methods available. The default method scales all cells to 10000 counts and transforms to log scale
+ggplot(metaData,aes(nUMI)) + geom_histogram(bins=60)
+seuratObj <- NormalizeData(object=seuratObj,normalization.method="LogNormalize",scale.factor=10000)
+
+### Get normalized values
+# raw counts are in the counts slot of the RNA object
+# normalized counts are in the data slot
+seuratObj@assays$RNA@counts[1:5,1:2]
+seuratObj@assays$RNA@data[1:5,1:2]
+
+##### Check per group #####
+metaDataTable <- seuratObj@meta.data
+
+# original number of transcripts per cell
+metaData$nUMI[1:5]
+
+# log normalized number of transcripts per cell
+metaDataTable$nUMI <- colSums(as.matrix(seuratObj@assays$RNA@data))
+metaDataTable$nUMI[1:5]
+ggplot(metaDataTable,aes(nUMI)) + geom_histogram(bins=60)
+
+# number of expressed genes per cell
+metaData$nGene[1:5]
+metaDataTable$nGene <- apply(as.matrix(seuratObj@assays$RNA@data),2,function(x){sum(x>0)})
+metaDataTable$nGene[1:5]
+
+```
+
+## Seurat pipeline: determine highly variable genes 
+We identify the subset of genes whose variability exceeds the background of technical noise. 
+
+Sometimes, spike-in transcripts (e.g. ERCC) are used to estimate the technical noise. Seurat provides a way to calculate highly variable genes in a data-driven way (useful especially when spike-in transcripts are not available).  
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+# FindVariableGenes() from Seurat package 
+# selection.method: vst helps control for the dependency between variance and mean expression 
+# nfeatures: identify the 2,000 most variable genes 
+# typical parameter settings for UMI data that is 
+# normalized to a total of 10000 counts.
+seuratObj <- FindVariableFeatures(object=seuratObj, selection.method="vst",nfeatures=2000)
+cat("Found",length(VariableFeatures(seuratObj)),"high variable genes\n")
+
+### Get more info about HVGs (mean,dispersion and dispersion scaled)
+head(HVFInfo(seuratObj))
+
+### Plot variable features
+plot1=VariableFeaturePlot(object=seuratObj)
+
+### Add labels for top 10 genes
+top20 <- head(VariableFeatures(seuratObj), 20)
+p <- LabelPoints(plot = plot1, points = top20)
+ggsave(p,file="results/4a_variableFeatures.png")
+
+
+```
+
+## Seurat pipeline: scaling of the data
+Apply a linear transformation (‘scaling’) that is a standard pre-processing step prior to dimensional reduction techniques like PCA.
+
+Scaling data => Shifts the expression of each gene, so that the mean expression across cells is 0.
+
+Scaling data => Scales the expression of each gene, so that the variance across cells is 1 (so that highly-expressed genes do not dominate). 
+
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+seuratObj <- ScaleData(object=seuratObj,features=rownames(seuratObj))
+
+# Scaled values are in the scale.data slot
+seuratObj@assays$RNA@scale.data[1:5,1:4]
+
+```
+
+## Seurat pipeline: performing a PCA (input: HVG)
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+# RunPCA() from Seurat package
+# features: which genes to use for PCA (the 2000 highly variable genes)
+# npcs: number of PCs to calculate
+# ndims.print: number of PCs with highest variability to show genes with heighest weights for: PC1, PC2, PC3, PC4, PC5
+# nfeatures.print: number of genes with heighest weights to print for these 5 PCs
+seuratObj <- RunPCA(object=seuratObj,features=VariableFeatures(seuratObj),npcs=50,ndims.print=1:5,nfeatures.print=10)
+
+# Results are stored in pca object of reductions slot
+names(seuratObj)
+seuratObj@reductions$pca@cell.embeddings[1:5,1:5]
+class(seuratObj@reductions$pca)
+?DimReduc
+seuratObj@reductions$pca@feature.loadings[1:5,1:5]
+
+#Examine and visualize PCA results a few different ways
+print(seuratObj[["pca"]], dims = 1:5, nfeatures = 5)
+VizDimLoadings(seuratObj, dims = 1:2, reduction = "pca")
+
+
+```
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+# PCA plot
+# DimPlot() from Seurat package
+# 2 PCs at a time -> dims let you choose the PCs
+# reduction: which data to use: pca? tsne? umap?
+DimPlot(object=seuratObj,reduction="pca",dims=c(1,2))
+DimPlot(object=seuratObj,reduction="pca",dims=c(2,3))
+DimPlot(object=seuratObj,reduction="pca",dims=c(1,3))
+
+```
+
+## Seurat pipeline: generate heatmaps of the PCs
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+### Create heatmap of PC 1-36
+# one heatmap per PC
+# counts of genes determine color
+# dims: which PCs to plot
+# cells: how many cells to plot
+# balanced: plot equal number of genes with highest and lowest weights?
+# fast: nicer and customizable plot made with ggplot2 but much slower to make
+DimHeatmap(seuratObj,dims=1:12,cells=500,balanced=TRUE)
+# the more PCs you plot the less clear the plots become
+# you start seeing noise
+DimHeatmap(seuratObj,dims=13:24,cells=500,balanced=TRUE)
+DimHeatmap(seuratObj,dims=25:36,cells=500,balanced=TRUE)
+    
+```
+
+## Seurat pipeline: Determine significant PCs : too heavy for my laptop (hence, eval=FALSE)!
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE, include=T, eval=FALSE}
+
+### Run Jackstraw and create plot. 
+# This can take a couple of minutes to calculate
+# Calculate significance (p-value) for every gene
+# Randomly permute 1% of the data and redo PCA, to get a 'null distribution' of weights, repeat this procedure
+# num.replicate: how many times to repeat the procedure
+# dims: number of PCs to calculate significance for
+seuratObj <- JackStraw(object=seuratObj,num.replicate=100,dims=40)
+
+# Significant PCs have strong enrichment of genes with low p-values.
+# Compare proportion of significant weights to those of random data
+# Returns p-value for every PC 
+seuratObj <- ScoreJackStraw(object=seuratObj,dims=1:40)
+
+# JackStraw plot compares the distribution of p-values for each PC with a uniform distribution (dashed line)
+# Significant PCs will have a strong enrichment of genes with low p-values (colored lines)
+
+# too heavy for my laptop!
+JackStrawPlot(object=seuratObj,dims=1:40)
+
+### Create PCElbowplot
+# Ranking of PCs based on percentage of variance explained by each one to find cutoff for p-value
+# See where plot flattens (=elbow)
+# Use in combination with PC heatmap
+# All plots combined: choose cutoff at PC20 
+
+#
+ElbowPlot(object=seuratObj,ndims=40)
+    
+```
+
+## Seurat pipeline: Dimensionality reduction - Clustering 
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+dimsToTry <- 20
+resToUse <- 0.8
+
+##### Find clusters
+# For every cell find its nearest neighbors = most similar cells (in terms of gene expression)
+# dims: how many PCs to use (cutoff)
+# As long as you get extra clusters increase the number of PCs
+seuratObj <- FindNeighbors(object=seuratObj,dims=1:dimsToTry)
+
+# Find clusters based on the neighbors info 
+# resolution: higher values create more clusters 
+# Try different values until you have a good tSNE / clustering with biologically meaningful results
+seuratObj <- FindClusters(object=seuratObj,resolution=resToUse)
+
+##### Create tSNE plot
+# Allow to plot in 2D
+# As input use the same PCs as in the clustering
+seuratObj <- RunTSNE(object=seuratObj,dims=1:dimsToTry)
+
+# reduction: which data to plot tsne or umap ?
+# label = TRUE:` put cluster labels on the plot
+# label.size: font size of cluster labels
+# pt.size: size of the points 
+DimPlot(seuratObj,reduction="tsne",label=TRUE,label.size=8,pt.size=2)
+
+# Same plot but cells from different samples colored differently
+DimPlot(seuratObj,reduction="tsne",label=FALSE,group.by="orig.ident",pt.size=2)
+
+# cluster data is stored in metadata
+clusterMatrix<-seuratObj@meta.data
+head(clusterMatrix)
+
+# Repeat with different setting for dims
+dimsToTry = 22
+seuratObj <- FindNeighbors(object=seuratObj,dims=1:dimsToTry)
+seuratObj <- FindClusters(object=seuratObj,resolution=resToUse)
+seuratObj <- RunTSNE(object=seuratObj,dims=1:dimsToTry)
+DimPlot(seuratObj,reduction="tsne",label=TRUE,label.size=8,pt.size=2)
+
+# When you change dims old cluster data is overwritten
+clusterMatrix<-seuratObj@meta.data
+head(clusterMatrix)
+
+# Repeat with different setting for resolution
+dimsToTry = 20
+resToUse = 1
+seuratObj <- FindNeighbors(object=seuratObj,dims=1:dimsToTry)
+seuratObj <- FindClusters(object=seuratObj,resolution=resToUse)
+seuratObj <- RunTSNE(object=seuratObj,dims=1:dimsToTry)
+DimPlot(seuratObj,reduction="tsne",label=TRUE,label.size=8,pt.size=2)
+
+# When you change resolution new cluster data is added to metadata
+# The last clustering that was run will be used for downstream analysis
+clusterMatrix<-seuratObj@meta.data
+head(clusterMatrix)
+
+##### Create UMAP plot
+# Install Anaconda
+# Open Anaconda prompt
+# Type pip install umap-lear
+dimsToTry = 10
+
+seuratObj <- RunUMAP(seuratObj,dims=1:dimsToTry,n_neighbors=20)
+
+# The distances between clusters in this plot are more meaningful than in a tSNE plot
+DimPlot(seuratObj,reduction.use="umap",label=TRUE,label.size=8)
+DimPlot(seuratObj,reduction.use="umap",label=FALSE,group.by="orig.ident")
+
+```
+
+
+## Seurat pipeline: save seurat object on your computer
+Save the object so that it can easily be loaded back without having to rerun all these computationally intensive steps or easily shared with collaborators.
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+sampleName <- "brainAppPs1Wt"
+saveRDS(seuratObj,file=paste0("results/seuratObj_",sampleName,".rds"))
+
+```
+
+
+## Seurat pipeline: Plot marker gene expression
+Visualize gene expression on tSNE or UMAP plot by coloring the cells on the plot according to one of their characteristics: expression level or weight of a certain gene, number of expressed genes...
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+# See which cells express a certain gene
+# features: which gene to plot
+# cols: string vector with 2 colors for the gradient
+# first color represents low values
+# second color represnts high values
+# min.cutoff: can specify a quantile e.g. 'q1','q10'
+FeaturePlot(object=seuratObj,features="Mafb",cols=c("grey","blue"),reduction="umap",min.cutoff="q2",max.cutoff="q98")
+
+FeaturePlot(object=seuratObj,features="Itgam",cols=c("grey","blue"),reduction="umap",min.cutoff="q2",max.cutoff="q98")
+
+```
+
+
+## Seurat pipeline: Finding differentially expressed features (cluster biomarkers)
+
+
+```{r,message=FALSE,warning=FALSE,tidy=TRUE}
+
+cluster1.markers <- FindMarkers(seuratObj, ident.1 = 1, min.pct = 0.25)
+head(cluster1.markers, n = 5)
+
+# find all markers distinguishing cluster 5 from clusters 0 and 3
+cluster5.markers <- FindMarkers(seuratObj, ident.1 = 5, ident.2 = c(0, 3), min.pct = 0.25)
+head(cluster5.markers, n = 5)
+
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+pbmc.markers <- FindAllMarkers(seuratObj, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+pbmc.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_logFC)
+top_markers=pbmc.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_logFC)
+
+VlnPlot(seuratObj, features = c("P2ry12", "Crybb1"), slot = "counts", log = TRUE)
+
+FeaturePlot(seuratObj, features = top_markers$gene[1:4])
+FeaturePlot(seuratObj, features = c("S100a4","Ccr7","Il7r"))
+# CD14, LYZ 	CD14+ Mono ?
+FeaturePlot(seuratObj, features = c("Lyz2"))
+# LB
+FeaturePlot(seuratObj, features = c("Ms4a1"))
+top_markers[top_markers$gene=="Ms4a1",]
+# NK
+FeaturePlot(seuratObj, features = c("Nkg7"))
+top_markers[top_markers$gene=="Nkg7",]
+# platelet
+FeaturePlot(seuratObj, features = c("Ppbp"))
+top_markers[top_markers$gene=="Nkg7",]
+
+# macrophage (BAM)
+FeaturePlot(seuratObj, features = c("Adgre1", "Fcgr1","Aif1"))
+
+top_markers <- pbmc.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+DoHeatmap(seuratObj, features = top_markers$gene) + NoLegend()
+
+saveRDS(seuratObj, file = "results/seuratObj_brainAppPs1Wt_final.rds")
+
+
+```
+
+0 	IL7R, CCR7 	Naive CD4+ T
+1 	IL7R, S100A4 	Memory CD4+
+2 	CD14, LYZ 	CD14+ Mono
+3 	MS4A1 	B
+4 	CD8A 	CD8+ T
+5 	FCGR3A, MS4A7 	FCGR3A+ Mono
+6 	GNLY, NKG7 	NK
+7 	FCER1A, CST3 	DC
+8 	PPBP 	Platelet
+
+new.cluster.ids <- c("Naive CD4 T", "Memory CD4 T", "CD14+ Mono", "B", "CD8 T", "FCGR3A+ Mono", 
+    "NK", "DC", "Platelet")
+names(new.cluster.ids) <- levels(pbmc)
+pbmc <- RenameIdents(pbmc, new.cluster.ids)
+DimPlot(pbmc, reduction = "umap", label = TRUE, pt.size = 0.5) + NoLegend()
+
+
+
+
+https://satijalab.org/seurat/v3.1/pbmc3k_tutorial.html
+
+https://satijalab.org/seurat/v3.1/de_vignette.html
+
+#nb of reads per cell per marker (here Sox17)
+rawexp=seuratObj@assays$RNA@counts["Sox17",]
+#cluster assignation per cell
+clusters=seuratObj@meta.data$seurat_clusters
+# total of reads for this marker and for each cluster (of course this depends on the size of the cluster)
+tapply(rawexp,clusters,sum)
